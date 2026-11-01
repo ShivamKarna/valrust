@@ -13,8 +13,6 @@ fn main() {
     let path = "measure.log";
     let _ = fs::remove_file(path);
 
-    // Build the whole log in memory and write it once.
-    // Calling db.set() n times would fsync n times, which takes minutes.
     let mut bytes = Vec::new();
     for i in 0..n {
         let op = Op::Set {
@@ -25,16 +23,25 @@ fn main() {
     }
     fs::write(path, &bytes).unwrap();
 
-    let size = fs::metadata(path).unwrap().len();
+    let size_before = fs::metadata(path).unwrap().len();
+    let t = Instant::now();
+    let mut db = KvStore::open(path).unwrap();
+    let open_before = t.elapsed();
 
     let t = Instant::now();
+    db.compact().unwrap();
+    let compact_time = t.elapsed();
+    drop(db);
+
+    let size_after = fs::metadata(path).unwrap().len();
+    let t = Instant::now();
     let db = KvStore::open(path).unwrap();
-    let open_time = t.elapsed();
+    let open_after = t.elapsed();
 
     println!("writes to the same key : {n}");
-    println!("live keys              : 1");
-    println!("log size               : {size} bytes");
-    println!("open() time            : {open_time:?}");
+    println!("before: {size_before} bytes, open() {open_before:?}");
+    println!("compact() took         : {compact_time:?}");
+    println!("after : {size_after} bytes, open() {open_after:?}");
     println!(
         "final value            : {}",
         String::from_utf8_lossy(db.get(b"counter").unwrap())

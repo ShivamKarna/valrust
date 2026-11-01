@@ -76,6 +76,14 @@ fn run() -> Result<(), Box<dyn Error>> {
             fs::write(LOG, &bytes)?;
             println!("flipped byte {pos}");
         }
+        ["compact"] => {
+            let mut db = KvStore::open(LOG)?;
+            let before = fs::metadata(LOG)?.len();
+            db.compact()?;
+            let after = fs::metadata(LOG)?.len();
+            println!("log: {before} -> {after} bytes");
+        }
+
         _ => print!("{USAGE}"),
     }
     Ok(())

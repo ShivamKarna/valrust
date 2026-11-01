@@ -1,7 +1,8 @@
-use std::fmt;
 use std::ops::Bound;
 use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
+use std::{fmt, fs};
 
+use crate::file::{sync_parent_dir, write_new_log};
 use crate::{
     errors::FileError,
     file::{LogEntry, Tail, append_entry, scan},
@@ -98,6 +99,11 @@ pub struct KvStore {
 
 impl KvStore {
     pub fn open(path: &str) -> Result<KvStore, FileError> {
+        let tmp = format!("{path}.tmp");
+        if Path::new(&tmp).exists() {
+            fs::remove_file(&tmp)?;
+        }
+
         let mut map = BTreeMap::new();
 
         if Path::new(path).exists() {
@@ -116,6 +122,7 @@ impl KvStore {
                 apply(&mut map, op);
             }
         }
+
         Ok(KvStore {
             path: path.to_string(),
             map,
@@ -154,6 +161,26 @@ impl KvStore {
             .range::<[u8], _>((Bound::Included(start), Bound::Excluded(end)))
             .map(|(k, v)| (k.as_slice(), v.as_slice()))
             .collect()
+    }
+
+    pub fn compact(&mut self) -> Result<(), FileError> {
+        let tmp = format!("{}.tmp", self.path);
+
+        let entries = self.map.iter().map(|(k, v)| {
+            LogEntry::new(
+                Op::Set {
+                    key: k.clone(),
+                    val: v.clone(),
+                }
+                .encode(),
+            )
+        });
+
+        write_new_log(&tmp, entries)?; // complete new log, synced
+        fs::rename(&tmp, &self.path)?; // atomic switch
+        sync_parent_dir(&self.path)?; // make the rename durable
+
+        Ok(())
     }
 }
 
@@ -445,6 +472,70 @@ mod test {
         assert!(s.scan_range(b"b", b"b").is_empty()); // start == end
 
         drop(s);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn leftover_tmp_is_ignored_and_removed_on_open() {
+        let path = temp_path("tmp_cleanup.log");
+        let tmp = format!("{path}.tmp");
+
+        {
+            let mut s = KvStore::open(&path).unwrap();
+            s.set(b"a", b"1").unwrap();
+        }
+        fs::write(&tmp, b"garbage from a crashed compaction").unwrap();
+
+        let s = KvStore::open(&path).unwrap();
+        assert_eq!(s.get(b"a"), Some(b"1".as_slice()));
+        assert!(!Path::new(&tmp).exists());
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn interrupted_compaction_keeps_old_log() {
+        let path = temp_path("interrupted.log");
+        let tmp = format!("{path}.tmp");
+
+        {
+            let mut s = KvStore::open(&path).unwrap();
+            s.set(b"a", b"1").unwrap();
+            s.set(b"a", b"2").unwrap();
+        }
+
+        // crash after the temp file was fully written but before the rename;
+        // the value differs from the real log to prove the temp file is never trusted
+        let entry = LogEntry::new(
+            Op::Set {
+                key: b"a".to_vec(),
+                val: b"999".to_vec(),
+            }
+            .encode(),
+        );
+        write_new_log(&tmp, vec![entry]).unwrap();
+
+        let s = KvStore::open(&path).unwrap();
+        assert_eq!(s.get(b"a"), Some(b"2".as_slice()));
+        assert!(!Path::new(&tmp).exists());
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn compact_is_repeatable_and_works_on_empty_store() {
+        let path = temp_path("compact_repeat.log");
+
+        let mut s = KvStore::open(&path).unwrap();
+        s.compact().unwrap(); // empty store
+        s.set(b"k", b"v").unwrap();
+        s.compact().unwrap();
+        s.compact().unwrap();
+        drop(s);
+
+        let s = KvStore::open(&path).unwrap();
+        assert_eq!(s.get(b"k"), Some(b"v".as_slice()));
 
         fs::remove_file(&path).unwrap();
     }

@@ -3,7 +3,8 @@
 
 use crate::errors::FileError;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, ErrorKind, Read, Write};
+use std::path::Path;
 
 // Constants
 pub const MAX_ENTRY_SIZE: usize = 16 * 1024 * 1024;
@@ -184,6 +185,32 @@ pub fn append_entry(path: &str, entry: &LogEntry) -> Result<(), FileError> {
 pub fn read_entries(path: &str) -> Result<Vec<LogEntry>, FileError> {
     Ok(scan(path)?.entries)
 }
+
+pub fn write_new_log<E>(path: &str, entries: E) -> Result<(), FileError>
+where
+    E: IntoIterator<Item = LogEntry>,
+{
+    let file = File::create(path)?;
+    let mut w = BufWriter::new(file);
+
+    for e in entries {
+        w.write_all(&e.serialize())?;
+    }
+
+    w.flush()?; // BufWriter buffer to file
+    w.get_ref().sync_all()?; // file to disk
+    Ok(())
+}
+
+pub fn sync_parent_dir(path: &str) -> Result<(), FileError> {
+    let parent = match Path::new(path).parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+
+    File::open(parent)?.sync_all()?;
+    Ok(())
+}
 #[cfg(test)]
 mod test {
     use super::*;
@@ -220,6 +247,7 @@ mod test {
 
         fs::remove_file(path).unwrap();
     }
+
     #[test]
     fn create_new_file_writes_content_to_file() {
         let p = temp_path("create_new.txt");
@@ -440,6 +468,24 @@ mod test {
         fs::write(path, &bytes).unwrap();
 
         assert!(matches!(scan(path), Err(FileError::CorruptedData)));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn write_new_log_roundtrips_and_replaces_old_content() {
+        let p = temp_path("write_new.log");
+        let path = p.to_str().unwrap();
+
+        append_entry(path, &entry("old")).unwrap(); // pre-existing content
+
+        let entries = vec![entry("one"), entry("two")];
+        write_new_log(path, entries).unwrap();
+
+        assert_eq!(
+            read_entries(path).unwrap(),
+            vec![entry("one"), entry("two")]
+        );
 
         fs::remove_file(path).unwrap();
     }
