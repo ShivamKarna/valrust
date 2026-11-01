@@ -193,7 +193,7 @@ mod test {
 
     fn temp_path(name: &str) -> String {
         let mut p = std::env::temp_dir();
-        p.push(format!("walrus_store_{}_{}", std::process::id(), name));
+        p.push(format!("valrust_store_{}_{}", std::process::id(), name));
         let _ = fs::remove_file(&p);
         p.to_str().unwrap().to_string()
     }
@@ -203,11 +203,11 @@ mod test {
         let path = temp_path("survive.log");
         {
             let mut store = KvStore::open(&path).unwrap();
-            store.set(b"name", b"walrus").unwrap();
+            store.set(b"name", b"valrust").unwrap();
             store.set(b"lang", b"rust").unwrap();
         } // store dropped here : the in-memory map is gone
         let store = KvStore::open(&path).unwrap(); // rebuiltt from log
-        assert_eq!(store.get(b"name"), Some(b"walrus".as_slice()));
+        assert_eq!(store.get(b"name"), Some(b"valrust".as_slice()));
         assert_eq!(store.get(b"lang"), Some(b"rust".as_slice()));
 
         fs::remove_file(&path).unwrap();
@@ -268,7 +268,7 @@ mod test {
         let ops = vec![
             Op::Set {
                 key: b"name".to_vec(),
-                val: b"walrus".to_vec(),
+                val: b"valrust".to_vec(),
             },
             Op::Set {
                 key: b"a".to_vec(),

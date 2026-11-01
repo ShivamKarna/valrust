@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "walrus"
+name = "valrust"
 version = "0.1.0"
 dependencies = [
  "crc32fast",

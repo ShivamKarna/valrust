@@ -219,7 +219,7 @@ mod test {
     fn temp_path(name: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
 
-        p.push(format!("walrus_{}_{}", std::process::id(), name));
+        p.push(format!("valrust_{}_{}", std::process::id(), name));
         let _ = fs::remove_file(&p); // ignore error if it doesn't exist.
         p
     }

@@ -2,8 +2,8 @@ use std::env;
 use std::error::Error;
 use std::fs::{self, OpenOptions};
 
-use walrus::file::scan;
-use walrus::kv_store::{KvStore, Op};
+use valrust::file::scan;
+use valrust::kv_store::{KvStore, Op};
 
 const LOG: &str = "data.log";
 

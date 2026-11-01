@@ -1,8 +1,8 @@
 use std::fs;
 use std::time::Instant;
 
-use walrus::file::LogEntry;
-use walrus::kv_store::{KvStore, Op};
+use valrust::file::LogEntry;
+use valrust::kv_store::{KvStore, Op};
 
 fn main() {
     let n: u32 = std::env::args()
