@@ -10,7 +10,7 @@ pub enum FileError {
     Io(io::Error),
     EmptyFile,
     CorruptedData,
-    InvalidUtf8,
+    InvalidUtf8(FromUtf8Error),
     FileAlreadyExists(String),
     ThreadPanic(String),
     EntryTooLarge,
@@ -26,8 +26,8 @@ impl fmt::Display for FileError {
             FileError::EmptyFile => {
                 write!(f, "file is empty, nothing to read")
             }
-            FileError::InvalidUtf8 => {
-                write!(f, "file is not a valid UTF-8 text")
+            FileError::InvalidUtf8(err) => {
+                write!(f, "Invalid Utf8 : {}", err)
             }
             FileError::FileAlreadyExists(path) => {
                 write!(
@@ -49,9 +49,10 @@ impl fmt::Display for FileError {
 }
 
 impl Error for FileError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+    fn source<'a>(&'a self) -> Option<&'a (dyn Error + 'static)> {
         match self {
             FileError::Io(e) => Some(e),
+            FileError::InvalidUtf8(e) => Some(e),
             _ => None,
         }
     }
@@ -65,7 +66,7 @@ impl From<io::Error> for FileError {
 }
 
 impl From<FromUtf8Error> for FileError {
-    fn from(_err: FromUtf8Error) -> Self {
-        FileError::InvalidUtf8
+    fn from(err: FromUtf8Error) -> Self {
+        FileError::InvalidUtf8(err)
     }
 }
