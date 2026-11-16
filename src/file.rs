@@ -216,12 +216,12 @@ mod test {
     use super::*;
 
     // helpers
-    fn temp_path(name: &str) -> std::path::PathBuf {
+    fn temp_path(name: &str) -> String {
         let mut p = std::env::temp_dir();
 
         p.push(format!("valrust_{}_{}", std::process::id(), name));
         let _ = fs::remove_file(&p); // ignore error if it doesn't exist.
-        p
+        p.to_str().unwrap().to_string()
     }
 
     fn entry(s: &str) -> LogEntry {
@@ -238,11 +238,10 @@ mod test {
 
     #[test]
     fn file_is_being_read() {
-        let p = temp_path("read.txt");
-        let path = p.to_str().unwrap();
-        fs::write(path, b"wow this is working").unwrap();
+        let path = temp_path("read.txt");
+        fs::write(&path, b"wow this is working").unwrap();
 
-        let result = read_from_file(path).unwrap();
+        let result = read_from_file(&path).unwrap();
         assert_eq!(result, b"wow this is working");
 
         fs::remove_file(path).unwrap();
@@ -250,25 +249,23 @@ mod test {
 
     #[test]
     fn create_new_file_writes_content_to_file() {
-        let p = temp_path("create_new.txt");
-        let path = p.to_str().unwrap();
+        let path = temp_path("create_new.txt");
 
-        create_new_file(path, &[1, 2, 3]).unwrap();
+        create_new_file(&path, &[1, 2, 3]).unwrap();
 
-        assert_eq!(read_from_file(path).unwrap(), [1, 2, 3]);
+        assert_eq!(read_from_file(&path).unwrap(), [1, 2, 3]);
 
         fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn create_new_file_refuses_second_write() {
-        let p = temp_path("create_new_exists.txt");
-        let path = p.to_str().unwrap();
+        let path = temp_path("create_new_exists.txt");
 
-        create_new_file(path, &[1]).unwrap();
-        let second = create_new_file(path, &[2]);
+        create_new_file(&path, &[1]).unwrap();
+        let second = create_new_file(&path, &[2]);
         assert!(matches!(second, Err(FileError::FileAlreadyExists(_))));
-        assert_eq!(read_from_file(path).unwrap(), [1]);
+        assert_eq!(read_from_file(&path).unwrap(), [1]);
 
         fs::remove_file(path).unwrap();
     }
@@ -292,35 +289,33 @@ mod test {
 
     #[test]
     fn append_entry_appends_in_order() {
-        let p = temp_path("append_order.txt");
-        let path = p.to_str().unwrap();
+        let path = temp_path("append_order.txt");
 
         let entry1 = LogEntry::new(Vec::from("Hello World From Entry 1"));
         let entry2 = LogEntry::new(Vec::from("This is Entry 2"));
 
-        append_entry(path, &entry1).unwrap();
-        append_entry(path, &entry2).unwrap();
+        append_entry(&path, &entry1).unwrap();
+        append_entry(&path, &entry2).unwrap();
 
         let mut expected = Vec::<u8>::new();
         expected.extend_from_slice(&entry1.serialize());
         expected.extend_from_slice(&entry2.serialize());
 
-        assert_eq!(read_from_file(path).unwrap(), expected);
+        assert_eq!(read_from_file(&path).unwrap(), expected);
 
         fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn read_entries_reads_entries_in_order() {
-        let p = temp_path("replay.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("replay.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
         assert_eq!(
-            read_entries(path).unwrap(),
+            read_entries(&path).unwrap(),
             vec![entry("one"), entry("two"), entry("three")]
         );
 
@@ -328,18 +323,17 @@ mod test {
     }
     #[test]
     fn torn_payload_is_ignored() {
-        let p = temp_path("torn_payload.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("torn_payload.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
         // cut 3 bytes of last entry
-        chop_tail(path, 3);
+        chop_tail(&path, 3);
 
         assert_eq!(
-            read_entries(path).unwrap(),
+            read_entries(&path).unwrap(),
             vec![entry("one"), entry("two")]
         );
 
@@ -348,19 +342,18 @@ mod test {
 
     #[test]
     fn torn_header_is_ignored() {
-        let p = temp_path("torn_header.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("torn_header.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
         // cut 7 bytes of last entry
         // three is 9 bytes, 4 header + 5 bytes, so cutting of 7 bytes leaves us with torn header
-        chop_tail(path, 7);
+        chop_tail(&path, 7);
 
         assert_eq!(
-            read_entries(path).unwrap(),
+            read_entries(&path).unwrap(),
             vec![entry("one"), entry("two")]
         );
 
@@ -369,31 +362,29 @@ mod test {
 
     #[test]
     fn garbage_length_is_reported_as_corrupted_data() {
-        let p = temp_path("garbage_length.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("garbage_length.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
-        append_entry(path, &entry("entry")).unwrap();
-        append_to_file(path, &[0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]).unwrap();
+        append_entry(&path, &entry("entry")).unwrap();
+        append_to_file(&path, &[0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]).unwrap();
 
-        assert!(matches!(read_entries(path), Err(FileError::CorruptedData)));
+        assert!(matches!(read_entries(&path), Err(FileError::CorruptedData)));
 
         fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn scan_clean_log() {
-        let p = temp_path("scan_clean");
-        let path = p.to_str().unwrap();
+        let path = temp_path("scan_clean");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
-        let scan_result = scan(path).unwrap();
+        let scan_result = scan(&path).unwrap();
 
         let total: usize = ["one", "two", "three"]
             .iter()
@@ -412,16 +403,15 @@ mod test {
 
     #[test]
     fn scan_torn_payload() {
-        let p = temp_path("scan_torn.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("scan_torn.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
-        chop_tail(path, 3);
+        chop_tail(&path, 3);
 
-        let scan_result = scan(path).unwrap();
+        let scan_result = scan(&path).unwrap();
 
         let good_len = entry("one").encoded_len() + entry("two").encoded_len();
 
@@ -434,16 +424,15 @@ mod test {
 
     #[test]
     fn scan_torn_header() {
-        let p = temp_path("scan_torn_header.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("scan_torn_header.log");
 
         for s in ["one", "two", "three"] {
-            append_entry(path, &entry(s)).unwrap();
+            append_entry(&path, &entry(s)).unwrap();
         }
 
-        chop_tail(path, entry("three").encoded_len() as u64 - 2);
+        chop_tail(&path, entry("three").encoded_len() as u64 - 2);
 
-        let scan_result = scan(path).unwrap();
+        let scan_result = scan(&path).unwrap();
 
         let good_len = entry("one").encoded_len() + entry("two").encoded_len();
 
@@ -456,34 +445,32 @@ mod test {
 
     #[test]
     fn flipped_payload_byte_read_as_corrupted_data() {
-        let p = temp_path("flipped_payload.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("flipped_payload.log");
 
-        append_entry(path, &entry("hello")).unwrap();
-        let mut bytes = fs::read(path).unwrap();
+        append_entry(&path, &entry("hello")).unwrap();
+        let mut bytes = fs::read(&path).unwrap();
 
         let last = bytes.len() - 1;
         bytes[last] ^= 0xFF;
 
-        fs::write(path, &bytes).unwrap();
+        fs::write(&path, &bytes).unwrap();
 
-        assert!(matches!(scan(path), Err(FileError::CorruptedData)));
+        assert!(matches!(scan(&path), Err(FileError::CorruptedData)));
 
         fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn write_new_log_roundtrips_and_replaces_old_content() {
-        let p = temp_path("write_new.log");
-        let path = p.to_str().unwrap();
+        let path = temp_path("write_new.log");
 
-        append_entry(path, &entry("old")).unwrap(); // pre-existing content
+        append_entry(&path, &entry("old")).unwrap(); // pre-existing content
 
         let entries = vec![entry("one"), entry("two")];
-        write_new_log(path, entries).unwrap();
+        write_new_log(&path, entries).unwrap();
 
         assert_eq!(
-            read_entries(path).unwrap(),
+            read_entries(&path).unwrap(),
             vec![entry("one"), entry("two")]
         );
 
