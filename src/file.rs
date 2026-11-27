@@ -60,6 +60,13 @@ pub fn scan(path: &str) -> Result<ScanResult, FileError> {
 }
 
 impl LogEntry {
+    pub fn validate_size(&self) -> Result<(), FileError> {
+        if self.payload.len() > MAX_ENTRY_SIZE {
+            return Err(FileError::EntryTooLarge);
+        }
+        Ok(())
+    }
+
     pub fn new(payload: Vec<u8>) -> Self {
         Self { payload }
     }
@@ -72,22 +79,30 @@ impl LogEntry {
         HEADER_LEN + self.payload.len()
     }
 
+    // pub fn serialize(&self) -> Vec<u8> {
+    //     // length
+    //     // hasher builder and finalize crc
+    //     // take an empty buffer and extend it with crc, and len, and payload
+    //     let len_bytes = (self.payload.len() as u32).to_be_bytes();
+    //
+    //     let mut hasher = crc32fast::Hasher::new();
+    //     hasher.update(&len_bytes);
+    //     hasher.update(&self.payload);
+    //     let crc = hasher.finalize();
+    //
+    //     let mut buffer = Vec::with_capacity(self.encoded_len());
+    //     buffer.extend_from_slice(&crc.to_be_bytes());
+    //     buffer.extend_from_slice(&len_bytes);
+    //     buffer.extend_from_slice(&self.payload);
+    //     buffer
+    // }
+    //
     pub fn serialize(&self) -> Vec<u8> {
-        // length
-        // hasher builder and finalize crc
-        // take an empty buffer and extend it with crc, and len, and payload
-        let len_bytes = (self.payload.len() as u32).to_be_bytes();
+        let mut buff = Vec::with_capacity(self.encoded_len());
+        self.write_to(&mut buff)
+            .expect("writing to a Vec can't fail");
 
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(&len_bytes);
-        hasher.update(&self.payload);
-        let crc = hasher.finalize();
-
-        let mut buffer = Vec::with_capacity(self.encoded_len());
-        buffer.extend_from_slice(&crc.to_be_bytes());
-        buffer.extend_from_slice(&len_bytes);
-        buffer.extend_from_slice(&self.payload);
-        buffer
+        buff
     }
 
     pub fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self> {
@@ -127,6 +142,22 @@ impl LogEntry {
         }
 
         Ok(LogEntry { payload })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let len_bytes = (self.payload().len() as u32).to_be_bytes();
+
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&len_bytes);
+        hasher.update(&self.payload);
+
+        let crc = hasher.finalize();
+
+        writer.write_all(&crc.to_be_bytes())?;
+        writer.write_all(&len_bytes)?;
+        writer.write_all(&self.payload)?;
+
+        Ok(())
     }
 }
 
@@ -176,10 +207,14 @@ pub fn create_new_file(file_path: &str, content: &[u8]) -> Result<(), FileError>
 
 // core functions
 pub fn append_entry(path: &str, entry: &LogEntry) -> Result<(), FileError> {
-    if entry.payload().len() > MAX_ENTRY_SIZE {
-        return Err(FileError::EntryTooLarge);
-    }
-    append_to_file(path, &entry.serialize())
+    entry.validate_size()?;
+
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+
+    entry.write_to(&mut file)?;
+
+    file.sync_all()?;
+    Ok(())
 }
 
 pub fn read_entries(path: &str) -> Result<Vec<LogEntry>, FileError> {
@@ -191,14 +226,16 @@ where
     E: IntoIterator<Item = LogEntry>,
 {
     let file = File::create(path)?;
-    let mut w = BufWriter::new(file);
+    let mut writer = BufWriter::new(file);
 
-    for e in entries {
-        w.write_all(&e.serialize())?;
+    for entry in entries {
+        entry.validate_size()?;
+
+        entry.write_to(&mut writer)?;
     }
 
-    w.flush()?; // BufWriter buffer to file
-    w.get_ref().sync_all()?; // file to disk
+    writer.flush()?; // BufWriter buffer to file
+    writer.get_ref().sync_all()?; // file to disk
     Ok(())
 }
 
@@ -211,6 +248,7 @@ pub fn sync_parent_dir(path: &str) -> Result<(), FileError> {
     File::open(parent)?.sync_all()?;
     Ok(())
 }
+
 #[cfg(test)]
 mod test {
     use super::*;
